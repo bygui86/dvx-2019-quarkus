@@ -1,0 +1,89 @@
+=  Cloud Native Deployment
+
+include::_attributes.adoc[]
+:quarkus-project-name: fruits-app
+:svc-path: fruit
+:experimental:
+
+At the end of this chapter you will be able to :
+
+* [x] Containerize the Quarkus Application
+* [x] Build and run the Quarkus Application in Kubernetes
+
+[#conk8s-prerequisite]
+== Prerequisite
+
+include::partial$prereq-cli.adoc[]
+
+[#conk8s-build-container-app]
+== Containerize Quarkus Application
+
+:section-k8s: basics
+include::ROOT:partial$build-containers.adoc[tag=build]
+
+After containerizing the application, we can verify the container by running the following commands: 
+
+:doc-sec: container
+include::ROOT:partial$build-containers.adoc[tag=run]
+
+You can <<conk8s-call-svc>> to see a response like `hello`.
+ 
+[#conk8s-call-svc]
+=== Invoke Service
+The simple `hello` REST URI can be called via browser using `http://$(minikube ip)/fruit` or using CLI like: 
+
+:doc-sec: basics
+:k8s-cli: k8s
+:path: fruit
+:k8s-env: minikube
+:cli-tool: curl
+:address: $(minikube ip)
+include::ROOT:partial$invoke-service.adoc[tag=call]
+
+Then you can stop the container by typing kbd:[Ctrl+C].
+
+[#conk8s-deploy-k8s-app]
+== Deploy Quarkus Application in Kubernetes
+
+:doc-sec: basics
+
+include::ROOT:partial$k8s-build-deploy.adoc[tag=k8s-prep]
+
+ifdef::workshop[]
+[#conk8s-k8s-tag-containers]
+=== Tag and push the container images
+
+As we have already built the container images, we might need to build and push it to remote container registry. The remote images from the container registry will be used in kubernetes deployments:
+
+With example variable settings as above, run the following commands to tag the images:
+
+include::ROOT:partial$build-containers.adoc[tag=tag-push]
+endif::[]
+
+[#conk8s-k8s-apply-resources]
+=== Apply Kubernetes Resources
+
+:container:
+include::ROOT:partial$k8s-build-deploy.adoc[tag=k8s-deploy]
+
+[WARNING]
+====
+A bug in the Dekorate library prevents Quarkus 0.27.0 to set the proper image name (see https://github.com/quarkusio/quarkus/issues/5135[bug report]).
+You can check the failure by running `kubectl get pods` and check that the fruit one is 0/1 and fails due to an image error.
+
+Edit the kubernetes resource to update the image via `kubectl edit deployment fruits-app` and search for the `image` property.
+Change the prefix from your username (or `developer`) to `example` which is the correct group under which we published our image earlier.
+Save and exit and the deployment should succeed.
+====
+
+[#conk8s-invoke-k8s-svc]
+=== Invoke Kubernetes Service
+
+:doc-sec: container
+include::ROOT:partial$k8s-build-deploy.adoc[tag=k8s-invoke-svc]
+
+[#conk8s-delete-k8s-app]
+=== Delete Kubernetes Resources
+
+:section-k8s: delete-basics
+include::ROOT:partial$k8s-build-deploy.adoc[tag=k8s-delete]

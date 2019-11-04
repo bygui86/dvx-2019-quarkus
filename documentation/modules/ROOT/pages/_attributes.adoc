@@ -1,0 +1,3 @@
+:moduledir: ..
+:branch: master
+:github-repo: https://github.com/redhat-developer-demos/quarkus-tutorial/blob/{branch}

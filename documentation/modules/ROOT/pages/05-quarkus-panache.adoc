@@ -1,0 +1,709 @@
+= Build Database Interactive Applications
+
+include::_attributes.adoc[]
+:quarkus-project-name: fruits-app
+:svc-path: fruit
+
+At the end of this chapter you will be able to :
+
+* [x] What is Panache ?
+* [x] How to build a Hibernate application using Panache?
+
+[#quarkusp-demo-overview]
+== Demo Overview 
+
+To demonstrate using Hibernate with Panache, you will be developing an application called "Fruits". Its a simple CRUD REST API that handles information about Fruits.
+
+For the demonstration we will use https://mariadb.org/[MariaDB] as a backing database.
+
+[#quarkusp-fruitapp-dev]
+=== Build and Deploy
+
+To get started with we will first have the database deployed:
+
+[#quarkus-fruit-app-db]
+==== Deploy MariaDB Stack
+
+[tabs]
+====
+ifndef::workshop[]
+kubectl::
++
+--
+[#quarkusp-deploy-db]
+[source,bash,subs="+macros,+attributes"]
+----
+kubectl apply -n {tutorial-namespace} -f pass:[$TUTORIAL_HOME]/kubernetes-app/mariadb.yaml
+----
+copyToClipboard::quarkusp-deploy-db[]
+
+A successful MariaDB deployment will have the following pods and services in the `{tutorial-namespace}` if it is running in a Kubernetes/OpenShift cluster.
+
+.pods
+[source,bash]
+----
+NAME                          READY   STATUS    RESTARTS   AGE
+db-adminer-678857cdb9-hw2km   1/1     Running   0          2m3s
+mariadb-58fb5df86c-wfbsj      1/1     Running   0          2m3s
+----
+
+.services
+[source,bash]
+----
+NAME         TYPE       CLUSTER-IP       EXTERNAL-IP   PORT(S)          AGE
+db-adminer   NodePort   10.101.171.237   <none>        9090:30397/TCP   2m21s
+mariadb      NodePort   10.105.40.135    <none>        3306:30125/TCP   2m21s
+----
+
+NOTE: The actual pod name and NodePort will be different on your environment
+--
+oc::
++
+--
+
+[#quarkusp-oc-deploy-db]
+[source,bash,subs="+macros,+attributes"]
+----
+oc apply -n {tutorial-namespace} -f pass:[$TUTORIAL_HOME]/kubernetes-app/mariadb.yaml
+----
+copyToClipboard::quarkusp-oc-deploy-db[]
+
+A successful MariaDB deployment will have the following pods and services in the `{tutorial-namespace}` if it is running in a Kubernetes/OpenShift cluster.
+
+.pods
+[source,bash]
+----
+NAME                          READY   STATUS    RESTARTS   AGE
+db-adminer-678857cdb9-hw2km   1/1     Running   0          2m3s
+mariadb-58fb5df86c-wfbsj      1/1     Running   0          2m3s
+----
+
+.services
+[source,bash]
+----
+NAME         TYPE       CLUSTER-IP       EXTERNAL-IP   PORT(S)          AGE
+db-adminer   NodePort   10.101.171.237   <none>        9090:30397/TCP   2m21s
+mariadb      NodePort   10.105.40.135    <none>        3306:30125/TCP   2m21s
+----
+
+NOTE: The actual pod name and NodePort will be different on your environment
+--
+endif::workshop[]
+docker::
++
+--
+[#quarkusp-docker-deploy-db]
+[source,bash,subs="+macros,+attributes"]
+----
+docker run -ti --rm --name mariadb -e MYSQL_ROOT_PASSWORD=superS3cret! -e MYSQL_USER=demo -e MYSQL_DATABASE=demodb -e MYSQL_PASSWORD=password -p 3306:3306  mariadb:10.4.4
+----
+copyToClipboard::quarkusp-docker-deploy-db[]
+Open a new terminal window:
+
+[#quarkusp-docker-deploy-adminer]
+[source,bash,subs="+macros,+attributes"]
+----
+docker run  --link mariadb -p 8082:8080 adminer:4.7.3-standalone
+----
+copyToClipboard::quarkusp-docker-deploy-adminer[]
+--
+====
+
+To access to DB adminer:
+
+[tabs]
+====
+ifndef::workshop[]
+minikube::
++
+--
+[#quarkusp-open-db-adminer]
+[source,bash,subs="+macros,+attributes"]
+----
+minikube service db-adminer -n {tutorial-namespace}
+----
+copyToClipboard::quarkusp-open-db-adminer[]
+--
+minishift::
++
+--
+[#quarkusp-minishift-open-db-adminer]
+[source,bash,subs="+macros,+attributes"]
+----
+minishift openshift service db-adminer -n {tutorial-namespace}
+----
+copyToClipboard::quarkusp-minishift-open-db-adminer[]
+--
+endif::workshop[]
+docker::
++
+--
+Open in a browser the next page: http://localhost:8082[http://localhost:8082,window=_blank]
+--
+====
+
+Use `mariadb` as host and `demodb` as database. 
+Any of the next parameters as authentication credentials are valid.
+
+.DB access details
+[cols="<,^,>",options="header"]
+|===
+| user | password | databases
+
+| root | superS3cret! | *
+| demo | password | demodb
+
+|===
+
+[#quarkusp-access-db]
+===== Accessing Database 
+To be able to access MariaDB database locally (`localhost` if you are not using the Docker approach), you need to `port-forward` the remote port to local port.
+
+ifndef::workshop[]
+
+Open a new terminal window and run the following command (blocking):
+
+[tabs]
+====
+kubectl::
++
+[#quarkuspdb-port-forward]
+[source,bash,subs="+macros,+attributes"]
+----
+kubectl -n {tutorial-namespace} port-forward svc/mariadb 3306:3306
+----
+copyToClipboard::quarkuspdb-port-forward[]
+oc::
++
+[#quarkuspdb-oc-port-forward]
+[source,bash,subs="+macros,+attributes"]
+----
+oc -n {tutorial-namespace} port-forward svc/mariadb 3306:3306
+----
+copyToClipboard::quarkuspdb-oc-port-forward[]
+====
+
+endif::workshop[]
+
+==== Build Fruit Resource
+
+The skeleton project to get started is the same you created at xref:02-basics-fundas.adoc[Basics and Fundamentals].
+
+NOTE: For the easier reference, we shall call the `fruits-app` project folder as pass:[$PROJECT_HOME]
+
+[#quarkusp-add-persistence-extensions]
+===== Add Extensions
+
+[#qext-mvn-add-persistence-extensions]
+[source,bash,subs="+macros,+attributes"]
+----
+./mvnw quarkus:add-extension -Dextension="quarkus-resteasy-jsonb, quarkus-jdbc-mariadb, quarkus-hibernate-orm-panache, quarkus-smallrye-openapi"
+----
+copyToClipboard::qext-mvn-add-persistence-extensions[]
+
+[NOTE]
+====
+If you use `tutorial-tools`, start MariaDB from the same Docker engine.
+Stop the `tutorial-tools` container and restart it with a link to mariadb
+
+`docker run -ti -p 8080:8080 -v `pwd`/work:/work -v `mvn help:evaluate -Dexpression=settings.localRepository | grep -v '\[INFO\]'`:/opt/developer/.m2/repository --link mariadb:mariadb --rm quay.io/rhdevelopers/tutorial-tools:0.0.3 bash`
+====
+
+[#quarkusp-configure-props]
+===== Edit the application.properties
+
+Add the following properties to `pass:[$PROJECT_HOME]/src/main/resources/application.properties`:
+
+[#quarkuspdb-update-props]
+[source,config,subs="+macros,+attributes"]
+----
+# configure your datasource
+# <1>
+quarkus.datasource.url = jdbc:mariadb://mariadb:3306/demodb 
+# <2>
+%dev.quarkus.datasource.url = jdbc:mariadb://127.0.0.1:3306/demodb 
+# <3>
+%fromtools.quarkus.datasource.url = jdbc:mariadb://mariadb:3306/demodb
+quarkus.datasource.driver = org.mariadb.jdbc.MariaDbDataSource
+quarkus.hibernate-orm.dialect = org.hibernate.dialect.MariaDB103Dialect 
+quarkus.datasource.username = demo
+quarkus.datasource.password = password
+
+# drop and create the database at startup (use `update` to only update the schema)
+quarkus.hibernate-orm.database.generation = drop-and-create
+# show sql statements in log 
+quarkus.hibernate-orm.log.sql = true
+----
+copyToClipboard::quarkuspdb-update-props[]
+
+<1> URL used when app is running in production (native or JAR)
+<2> URL used when app is running in development mode
+<2> URL used when app is running in development mode via tutorial-tools
+
+NOTE: In tutorial-tools, we use the mariadb DNS name using the profile `fromtools`. Start Quarkus dev with this command `./mvnw compile quarkus:dev -Dquarkus.profile=fromtools`.
+
+===== Test Database connection
+
+Lets start Quarkus in `development` mode to verify the database connection works:
+
+[#quarkuspdb-test-dbconn]
+[source,config,subs="+macros,+attributes"]
+----
+./mvnw compile quarkus:dev
+----
+copyToClipboard::quarkuspdb-test-dbconn[]
+
+If all went well then you should be seeing something like the following in the log:
+[source,bash]
+----
+Listening for transport dt_socket at address: 5005
+2019-05-26 12:27:56,510 INFO  [io.qua.dep.QuarkusAugmentor] (main) Beginning quarkus augmentation
+2019-05-26 12:27:58,821 INFO  [io.qua.dep.QuarkusAugmentor] (main) Quarkus augmentation completed in 2311ms
+2019-05-26 12:27:58,935 INFO  [io.qua.swa.run.SwaggerUiServletExtension] (main) Swagger UI available at /swagger-ui
+2019-05-26 12:27:59,391 INFO  [io.quarkus] (main) Quarkus 0.15.0 started in 3.166s. Listening on: http://[::]:8080
+2019-05-26 12:27:59,392 INFO  [io.quarkus] (main) Installed features: [agroal, cdi, hibernate-orm, jdbc-mariadb, narayana-jta, resteasy, resteasy-jsonb, smallrye-health, smallrye-openapi, swagger-ui]
+----
+
+As you would have noticed there is no database logs. That's because we dont have any database related code yet:
+
+[#quarkusp-create-fruit-entity]
+===== Create Fruit Entity
+
+Add new Java file in `$PROJECT_HOME/src/main/java/com/example` called `Fruit` with the following contents:
+
+[#quarkusp-fruit-entity]
+[source,java,subs="+macros,+attributes"]
+----
+package com.example;
+
+import javax.persistence.Entity;
+
+@Entity
+public class Fruit {
+
+    public String name;
+    public String season;
+
+}
+----
+copyToClipboard::quarkusp-fruit-entity[]
+
+[#quarkusp-edit-fruit-resource]
+===== Update Fruit Resource
+
+Edit the Java file `$PROJECT_HOME/src/main/java/com/example/FruitResource.java`, remove `hello()` method and add a new REST method to get all the available fruits:
+
+[#quarkusp-fruit-entity1]
+[source,java,subs="+macros,+attributes"]
+----
+package com.example;
+
+import java.util.List;
+import javax.ws.rs.Consumes;
+import javax.ws.rs.GET;
+import javax.ws.rs.Path;
+import javax.ws.rs.Produces;
+import javax.ws.rs.core.MediaType;
+
+@Path("/fruit")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+public class FruitResource {
+
+    @GET
+    public List<Fruit> allFruits() {
+        return Fruit.listAll(); #<1>
+    }
+}
+----
+copyToClipboard::quarkusp-fruit-entity1[]
+
+<1> Your IDE will show an errors in `FruitResource.java` as it does not have a method `listAll()` in `Fruit` entity class.
+
+Do I need to add it ? The simple answer is **NO**.
+
+[#quarkusp-what-is-panache]
+===== Make Fruit Entity a Panache Entity 
+
+****
+
+**What is Panache ?**
+
+Hibernate ORM is the de facto JPA implementation and offers you the full breadth of an Object Relational Mapper. It makes complex mappings possible, but it does not make simple and common mappings trivial. Hibernate ORM with Panache focuses on making your entities trivial and fun to write in Quarkus.
+
+More info https://quarkus.io/guides/hibernate-orm-panache-guide[Panache Guide]
+
+****
+
+[#quarkusp-fruit-entity2]
+[source,java,subs="+macros,+attributes"]
+----
+package com.example;
+
+import javax.persistence.Entity;
+import io.quarkus.hibernate.orm.panache.PanacheEntity;
+
+@Entity
+public class Fruit extends PanacheEntity {
+
+    public String name;
+    public String season;
+
+}
+----
+copyToClipboard::quarkusp-fruit-entity2[]
+
+Making the `Fruit` entity as a `Panache Entity` will make it both Entity and DAO and ofcourse the error in the `FruitResource.java` disappears.
+
+Lets now access the Fruits API http://localhost:8080/fruit. If all goes well you will see some Hibernate SQL statements in the log that will create the new table `Fruit` with columns from `Fruit.java` entity class.
+
+[TIP]
+====
+You have accessed the application using http://localhost:8080/fruit. If you want you can enable `Swagger` by adding the extension:
+
+[#qext-mvn-add-swagger-ui-extensions]
+[source,bash,subs="+macros,+attributes"]
+----
+./mvnw quarkus:add-extension -Dextension="openapi"
+----
+copyToClipboard::qext-mvn-add-swagger-ui-extensions[]
+
+And then access the swagger UI using the url http://localhost:8080/swagger-ui.
+====
+
+Since we don't have any fruits in the DB you would have got an empty response back. 
+
+Lets add a REST method to the `FruitResource.java` to save a 'Fruit':
+
+[#quarkusp-fruit-add-persist]
+[source,java,subs="+macros,+attributes"]
+----
+package com.example;
+
+import java.net.URI;
+import java.util.List;
+
+import javax.transaction.Transactional;
+import javax.ws.rs.Consumes;
+import javax.ws.rs.GET;
+import javax.ws.rs.POST;
+import javax.ws.rs.Path;
+import javax.ws.rs.Produces;
+import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
+import javax.ws.rs.core.UriBuilder;
+
+@Path("/fruit")
+@Consumes(MediaType.APPLICATION_JSON)
+@Produces(MediaType.APPLICATION_JSON)
+public class FruitResource {
+
+    @GET
+    public List<Fruit> allFruits() {
+        return Fruit.listAll(); 
+    }
+
+    @POST
+    @Transactional
+    public Response saveFruit(Fruit fruit) {
+        // since the FruitEntity is a panache entity 
+        // persist is available by default
+        fruit.persist();
+        final URI createdUri = UriBuilder.fromResource(FruitResource.class)
+                        .path(Long.toString(fruit.id))
+                        .build();
+        return Response.created(createdUri).build();
+    }
+}
+----
+copyToClipboard::quarkusp-fruit-add-persist[]
+
+You can insert a new fruit by using the next `curl` command: `curl -vvv -d '{"name": "banana", "season": "summer"}' -H "Content-Type: application/json" POST http://localhost:8080/fruit`
+
+Or if you have the Swagger UI http://localhost:8080/swagger-ui enabled you can do it form there as well.
+
+Try adding a fruit via the Swagger UI Post and try listing the available fruits. A good day scenario will return a JSON like:
+
+[source,json]
+----
+{
+    "name": "banana",
+    "season": "summer"
+}
+----
+
+NOTE: The response may vary based on what fruit you added.
+
+[#quarkusp-fruits-finder]
+===== Finders 
+Cool! So far we did with some primitive methods lets explore some cool things that Panache offers. 
+
+Lets try to find all fruits by a season. To make the query return some data let us add some fruits to the DB.
+
+Create the following `import.sql` file in `$PROJECT_HOME/src/main/resources`:
+
+[#quarkusp-add-fruits]
+[source,sql,subs="+macros,+attributes"]
+----
+INSERT INTO Fruit(id,name,season) VALUES (nextval(hibernate_sequence),"Mango","Spring");
+INSERT INTO Fruit(id,name,season) VALUES (nextval(hibernate_sequence),"Strawberry","Spring");
+INSERT INTO Fruit(id,name,season) VALUES (nextval(hibernate_sequence),"Orange","Winter");
+INSERT INTO Fruit(id,name,season) VALUES (nextval(hibernate_sequence),"GrapeFruit","Winter");
+INSERT INTO Fruit(id,name,season) VALUES (nextval(hibernate_sequence),"Blueberry","Summer");
+INSERT INTO Fruit(id,name,season) VALUES (nextval(hibernate_sequence),"Banana","Summer");
+INSERT INTO Fruit(id,name,season) VALUES (nextval(hibernate_sequence),"Plum","Summer");
+INSERT INTO Fruit(id,name,season) VALUES (nextval(hibernate_sequence),"Apple","Fall");
+INSERT INTO Fruit(id,name,season) VALUES (nextval(hibernate_sequence),"Grapes","Fall");
+----
+copyToClipboard::quarkusp-add-fruits[]
+
+Update the `Fruit` entity with a finder method like 
+
+[#quarkusp-find-fruits]
+[source,java,subs="+macros,+attributes"]
+----
+package com.example;
+
+import java.util.List;
+import javax.persistence.Entity;
+import io.quarkus.hibernate.orm.panache.PanacheEntity;
+
+@Entity
+public class Fruit extends PanacheEntity {
+
+    public String name;
+    public String season;
+
+    public static List<Fruit> getAllFruitsForSeason(String season) {
+        return find("season", season).list();
+    }
+
+}
+----
+copyToClipboard::quarkusp-find-fruits[]
+
+
+Update the `Fruit` resource with a REST method to get fruits by season: 
+
+[#quarkusp-get-find-fruits]
+[source,java,subs="+macros,+attributes"]
+----
+package com.example;
+
+import java.util.List;
+import javax.transaction.Transactional;
+import javax.ws.rs.Consumes;
+import javax.ws.rs.GET;
+import javax.ws.rs.POST;
+import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
+import javax.ws.rs.Produces;
+import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
+
+@Path("/fruit")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+public class FruitResource {
+
+    @GET
+    public List<Fruit> allFruits() {
+        return Fruit.listAll();
+    }
+
+    @GET
+    @Path("pass:[{season}]")
+    public List<Fruit> fruitsBySeason(@PathParam("season") String season) {
+        return Fruit.getAllFruitsForSeason(season);
+    }
+
+    @POST
+    @Transactional
+    public Response saveFruit(Fruit fruit) {
+        // just allow it to be generated
+        fruit.id = null;
+        // since the FruitEntity is a panache entity persist is available by default
+        fruit.persist();
+        return Response.ok(201).entity(fruit).build();
+    }
+}
+
+----
+copyToClipboard::quarkusp-get-find-fruits[]
+
+IMPORTANT: Remember to remove the `getFruitInfoByName` method created in previous section.
+
+To test finder use the Swagger UI http://localhost:8080/swagger-ui. 
+
+A finder for fruits for __summer__ season should return a response like :
+
+[source,json]
+----
+[
+  {
+    "id": 5,
+    "name": "Blueberry",
+    "season": "Summer"
+  },
+  {
+    "id": 6,
+    "name": "Banana",
+    "season": "Summer"
+  },
+  {
+    "id": 7,
+    "name": "Plum",
+    "season": "Summer"
+  }
+]
+----
+
+[#quarkusp-testing]
+==== Testing Fruit Resource
+
+Let's write a test to validate that inserting and finding methods works as expected.
+
+[#quarkusp-testing-dep]
+===== Adding AssertJ Dependency
+
+To validate simple output messages RestAssured assertions mechanism is enough but in our experience, when start dealing with more complex assertions then things might become a bit more complex. 
+For this reason, we encourage you to start using https://assertj.github.io/doc/[AssertJ].
+
+Open `$PROJECT_HOME/pom.xml` and add the next dependency in `dependencies` section:
+
+[#quarkusp-register-assertj]
+[source,xml,subs="+macros,+attributes"]
+----
+<dependency>
+    <groupId>org.assertj</groupId>
+    <artifactId>assertj-core</artifactId>
+    <version>3.13.2</version>
+    <scope>test</scope>
+</dependency>
+----
+copyToClipboard::quarkusp-register-assertj[]
+
+[#quarkusp-write-persistence-test]
+===== Write Persistence Test 
+
+Open the next class `$PROJECT_HOME/src/test/java/com/example/FruitResourceTest.java` and copy the next content:
+
+[#quarkusp-test-class]
+[source,java,subs="+macros"]
+----
+package com.example;
+
+import io.quarkus.test.junit.QuarkusTest;
+
+import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.MethodOrderer.OrderAnnotation;
+
+import java.util.List;
+
+import static io.restassured.RestAssured.given;
+import static org.assertj.core.api.Assertions.assertThat;
+
+@QuarkusTest
+@TestMethodOrder(OrderAnnotation.class)
+public class FruitResourceTest {
+
+    @Test
+    @Order(1)
+    public void testInsertFruit() {
+
+        Fruit fruit = new Fruit();
+        fruit.name = "Watermelon";
+        fruit.season = "summer";
+
+        given()
+          .contentType("application/json")
+          .body(fruit)
+          .when()
+          .post("/fruit")
+          .then()
+          .assertThat()
+          .statusCode(201);
+    }
+
+    @Test
+    @Order(2)
+    public void testFindFruitsBySeason() {
+        final List<Fruit> fruits = given()
+          .when()
+          .get("/fruit/{season}", "summer")
+          .then()
+          .assertThat()
+          .statusCode(200)
+          .extract()
+          .body()
+          .jsonPath()
+          .getList(".", Fruit.class);
+          
+        assertThat(fruits)
+            .extracting("name")
+            .containsExactlyInAnyOrder("Banana", "Watermelon", "Plum", "Blueberry");
+    }
+
+}
+----
+copyToClipboard::quarkusp-test-class[]
+
+include::ROOT:partial$invoke-service.adoc[tag=test]
+
+ifndef::workshop[]
+
+[#quarkusp-cloud-dev]
+=== Deploy on Kubernetes
+
+If you are using Kubernetes/OpenShift instead of Docker you can deploy the application to Kubernetes/OpenShift following the next steps:
+
+We need to build the `{quarkus-project-name}` application and container before deploying them on kubernetes.
+
+NOTE: You can stop the `port-forward` and Quarkus application running in development mode 
+
+[#quarkusp-cloud-dev-build-container]
+==== Build the application container
+
+:quarkus-project-name: fruit-app
+:section-k8s: persistence
+include::ROOT:partial$build-containers.adoc[tag=build]
+
+[#quarkusp-cloud-dev-prepare-app]
+==== Prepare the Kubernetes Deployment
+
+include::ROOT:partial$k8s-build-deploy.adoc[tag=k8s-prep]
+
+==== Tag and Push the application container
+
+As we have already built the container images, we might need to build and push it to remote container registry. The remote images from the container registry will be used in kubernetes deployments:
+
+With example variable settings as above, run the following commands to tag the images:
+
+:doc-sec: tag-push-panache
+include::ROOT:partial$build-containers.adoc[tag=tag-push]
+
+[#quarkusp-cloud-dev-apply-resources]
+==== Apply Resources
+
+Once the images has been pushed to container registry, run the following command to deploy the application to kubernetes:
+
+:doc-sec: k8s-deploy-panache
+include::ROOT:partial$k8s-build-deploy.adoc[tag=k8s-deploy]
+
+[#quarkusp-invoke-k8s-svc]
+==== Invoke Kubernetes Service
+
+:doc-sec: k8s-invoke-panache
+include::ROOT:partial$k8s-build-deploy.adoc[tag=k8s-invoke-svc]
+
+NOTE: `swagger-ui` is available only for `dev` and `test`, you can use REST API tools to access API.
+
+[#quarkusp-persistence-k8s-delete-resources]
+=== Delete Kubernetes Resources
+
+:section-k8s: persistence
+include::ROOT:partial$k8s-build-deploy.adoc[tag=k8s-delete]
+
+endif::workshop[]
