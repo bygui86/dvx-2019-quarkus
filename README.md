@@ -1,5 +1,5 @@
 
-# Instructions
+# Learn to build Cloud Native Java Applications with Quarkus - Instructions
 
 ## Pull Docker images
 ```shell
